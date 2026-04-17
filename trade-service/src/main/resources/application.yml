@@ -1,0 +1,71 @@
+spring:
+  application:
+    name: trade-service
+
+server:
+  port: 8080
+
+# ===== ACTUATOR =====
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics,env,loggers
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: always
+      show-components: always
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+      percentiles:
+        http.server.requests: 0.5, 0.90, 0.95, 0.99
+  tracing:
+    sampling:
+      probability: 1.0   # 100% sampling in dev; set to 0.1 in prod
+  otlp:
+    tracing:
+      endpoint: http://otel-collector:4318/v1/traces
+    metrics:
+      export:
+        url: http://otel-collector:4318/v1/metrics
+
+# ===== APP INFO (shows in /actuator/info) =====
+info:
+  app:
+    name: ${spring.application.name}
+    version: 1.0.0
+    description: SRE Lab Trade Microservice
+    environment: ${ENVIRONMENT:local}
+
+# ===== RESILIENCE4J =====
+resilience4j:
+  circuitbreaker:
+    instances:
+      tradeExecution:
+        sliding-window-size: 10
+        failure-rate-threshold: 50          # open CB after 50% failures
+        wait-duration-in-open-state: 30s
+        permitted-calls-in-half-open-state: 3
+        register-health-indicator: true
+  ratelimiter:
+    instances:
+      tradeApi:
+        limit-for-period: 100               # 100 requests per refresh period
+        limit-refresh-period: 1s
+        timeout-duration: 0s
+        register-health-indicator: true
+
+# ===== LOGGING =====
+logging:
+  level:
+    root: INFO
+    com.srelab: DEBUG
+    org.springframework.web: INFO

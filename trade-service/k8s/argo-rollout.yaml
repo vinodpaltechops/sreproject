@@ -1,0 +1,91 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: trade-service
+  namespace: trade-app
+spec:
+  replicas: 4
+  strategy:
+    canary:
+      analysis:
+        templates:
+          - templateName: trade-success-rate
+        startingStep: 2
+        args:
+          - name: service-name
+            value: trade-service
+      steps:
+        - setWeight: 20
+        - pause: {duration: 2m}
+        - setWeight: 50
+        - pause: {duration: 2m}
+        - setWeight: 100
+  selector:
+    matchLabels:
+      app: trade-service
+  template:
+    metadata:
+      labels:
+        app: trade-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/actuator/prometheus"
+        prometheus.io/port: "8080"
+    spec:
+      serviceAccountName: trade-service-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: trade-service
+          image: <ACCOUNT>.dkr.ecr.ap-south-1.amazonaws.com/trade-service:v1.0
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 5
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: trade-success-rate
+  namespace: trade-app
+spec:
+  args:
+    - name: service-name
+  metrics:
+    - name: success-rate
+      interval: 1m
+      successCondition: result[0] >= 0.95
+      failureLimit: 3
+      provider:
+        prometheus:
+          address: http://kube-prometheus-prometheus.monitoring:9090
+          query: |
+            sum(rate(http_server_requests_seconds_count{
+              job="{{args.service-name}}",status!~"5.."
+            }[5m])) /
+            sum(rate(http_server_requests_seconds_count{
+              job="{{args.service-name}}"
+            }[5m]))

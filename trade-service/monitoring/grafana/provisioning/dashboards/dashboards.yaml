@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: 'SRE Lab'
+    folder: 'SRE Lab'
+    type: file
+    options:
+      path: /etc/grafana/provisioning/dashboards

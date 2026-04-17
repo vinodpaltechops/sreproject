@@ -1,0 +1,17 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: trade-service-monitor
+  namespace: monitoring
+  labels:
+    release: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app: trade-service
+  namespaceSelector:
+    matchNames: [trade-app]
+  endpoints:
+    - port: http
+      path: /actuator/prometheus
+      interval: 15s

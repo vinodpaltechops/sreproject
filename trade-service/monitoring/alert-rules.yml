@@ -1,0 +1,69 @@
+groups:
+  - name: sre.trade.slo
+    interval: 30s
+    rules:
+      # SLO: Error rate must stay below 1%
+      - alert: TradeServiceHighErrorRate
+        expr: |
+          (
+            rate(http_server_requests_seconds_count{job="trade-service", status=~"5.."}[5m])
+            /
+            rate(http_server_requests_seconds_count{job="trade-service"}[5m])
+          ) > 0.01
+        for: 2m
+        labels:
+          severity: warning
+          team: sre
+        annotations:
+          summary: "Trade service error rate above SLO (>1%)"
+          description: "Error rate is {{ humanizePercentage $value }} for the last 5m."
+          runbook: "https://wiki/runbooks/trade-high-error-rate"
+
+      # SLO: p99 latency must stay below 2s
+      - alert: TradeServiceHighLatencyP99
+        expr: |
+          histogram_quantile(0.99,
+            rate(trade_processing_duration_seconds_bucket{job="trade-service"}[5m])
+          ) > 2
+        for: 5m
+        labels:
+          severity: critical
+          team: sre
+        annotations:
+          summary: "Trade p99 latency breaching SLO (>2s)"
+          description: "p99 latency is {{ $value | humanizeDuration }}"
+          runbook: "https://wiki/runbooks/trade-high-latency"
+
+      # Circuit breaker opened — trades being rejected
+      - alert: TradeCircuitBreakerOpen
+        expr: |
+          increase(trades_rejected_total{job="trade-service"}[5m]) > 5
+        for: 1m
+        labels:
+          severity: critical
+          team: sre
+        annotations:
+          summary: "Trade circuit breaker is open — trades rejected"
+          description: "{{ $value }} trades rejected in last 5m."
+
+      # Pod availability below minimum
+      - alert: TradeServicePodDown
+        expr: |
+          kube_deployment_status_replicas_available{deployment="trade-service"} < 2
+        for: 1m
+        labels:
+          severity: critical
+          team: sre
+        annotations:
+          summary: "Trade service below minimum replicas (need 2)"
+
+      # High pending trade queue
+      - alert: TradeQueueSaturated
+        expr: trades_pending_count{job="trade-service"} > 50
+        for: 2m
+        labels:
+          severity: warning
+          team: sre
+        annotations:
+          summary: "Trade pending queue growing — potential bottleneck"
+          description: "{{ $value }} trades pending, threshold is 50"

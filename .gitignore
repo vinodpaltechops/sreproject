@@ -1,0 +1,24 @@
+# Maven
+target/
+*.jar
+*.war
+*.class
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes / runtime
+*.log
+positions.yaml
+
+# Secrets
+.env
+*.pem
+*.key

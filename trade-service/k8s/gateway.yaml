@@ -1,0 +1,35 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: sre-gateway
+  namespace: trade-app
+spec:
+  gatewayClassName: aws-alb
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: trade-routes
+  namespace: trade-app
+spec:
+  parentRefs:
+    - name: sre-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/trades
+      backendRefs:
+        - name: trade-service
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /actuator/health
+      backendRefs:
+        - name: trade-service
+          port: 8080

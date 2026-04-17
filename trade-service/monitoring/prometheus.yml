@@ -1,0 +1,31 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+rule_files:
+  - alert-rules.yml
+
+scrape_configs:
+  # Trade service actuator endpoint
+  - job_name: 'trade-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['trade-service:8080']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  # OTel collector self-metrics
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector:8889']
+
+  # Prometheus self-scrape
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
