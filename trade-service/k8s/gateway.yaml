@@ -1,15 +1,73 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Gateway — AWS ALB via Gateway API
+# Requires: AWS Load Balancer Controller v2.7+ with Gateway API feature gate on
+# CRDs:     kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.1.0/standard-install.yaml
+# ──────────────────────────────────────────────────────────────────────────────
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: sre-gateway
   namespace: trade-app
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/certificate-arn: "${CERTIFICATE_ARN}"
+    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06
+    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=60
 spec:
   gatewayClassName: aws-alb
   listeners:
+    # HTTP — redirect all traffic to HTTPS
     - name: http
       protocol: HTTP
       port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same
+
+    # HTTPS — TLS terminated at ALB using ACM certificate
+    - name: https
+      protocol: HTTPS
+      port: 443
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            group: ""
+            name: tls-secret   # placeholder; ALB uses the ACM ARN annotation above
+      allowedRoutes:
+        namespaces:
+          from: Same
+
 ---
+# ──────────────────────────────────────────────────────────────────────────────
+# HTTPRoute — HTTP → HTTPS redirect
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: http-redirect
+  namespace: trade-app
+spec:
+  parentRefs:
+    - name: sre-gateway
+      sectionName: http
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+
+---
+# ──────────────────────────────────────────────────────────────────────────────
+# HTTPRoute — main HTTPS routes
+# Routing strategy:
+#   /api/trades/**          → trade-service  (public)
+#   /actuator/health        → trade-service  (ALB health check only)
+#   /api/trades/simulate/** → BLOCKED        (chaos endpoints, internal only)
+#   /actuator/**            → BLOCKED        (never expose metrics/env externally)
+# ──────────────────────────────────────────────────────────────────────────────
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -18,18 +76,93 @@ metadata:
 spec:
   parentRefs:
     - name: sre-gateway
+      sectionName: https
   rules:
+
+    # ── Rule 1: Block chaos simulation endpoints from external traffic ─────────
     - matches:
         - path:
             type: PathPrefix
-            value: /api/trades
-      backendRefs:
-        - name: trade-service
-          port: 8080
+            value: /api/trades/simulate
+      filters:
+        - type: RequestRedirect
+          requestRedirect:
+            statusCode: 403
+
+    # ── Rule 2: Block all actuator except health (security — no metrics leak) ──
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /actuator
+          path:
+            type: PathPrefix
+            value: /actuator/prometheus
+        - path:
+            type: PathPrefix
+            value: /actuator/env
+        - path:
+            type: PathPrefix
+            value: /actuator/loggers
+      filters:
+        - type: RequestRedirect
+          requestRedirect:
+            statusCode: 403
+
+    # ── Rule 3: Health check — allowed for ALB target group health probes ─────
     - matches:
         - path:
             type: PathPrefix
             value: /actuator/health
+      backendRefs:
+        - name: trade-service
+          port: 8080
+
+    # ── Rule 4: Trade API — standard routing with timeout ─────────────────────
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/trades
+          method: GET
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            add:
+              - name: X-Forwarded-By
+                value: sre-gateway
+      backendRefs:
+        - name: trade-service
+          port: 8080
+
+    # ── Rule 5: Trade submission (POST) — canary header-based routing ──────────
+    # Header X-Canary: true  → canary deployment (weight 10)
+    # All other POST traffic → stable deployment (weight 90)
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/trades
+          method: POST
+          headers:
+            - name: X-Canary
+              value: "true"
+      backendRefs:
+        - name: trade-service-canary
+          port: 8080
+          weight: 10
+        - name: trade-service
+          port: 8080
+          weight: 90
+
+    # ── Rule 6: All other POST/DELETE/PATCH trade requests ────────────────────
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/trades
+      filters:
+        - type: RequestHeaderModifier
+          requestHeaderModifier:
+            add:
+              - name: X-Forwarded-By
+                value: sre-gateway
       backendRefs:
         - name: trade-service
           port: 8080

@@ -27,7 +27,7 @@ spec:
         fsGroup: 2000
       containers:
         - name: trade-service
-          image: <ACCOUNT>.dkr.ecr.ap-south-1.amazonaws.com/trade-service:v1.0
+          image: 748624205055.dkr.ecr.ap-south-1.amazonaws.com/trade-service:IMAGE_TAG
           ports:
             - containerPort: 8080
           securityContext:
@@ -40,6 +40,11 @@ spec:
               value: production
             - name: SPRING_PROFILES_ACTIVE
               value: production
+            - name: JAVA_TOOL_OPTIONS
+              value: "-Djava.io.tmpdir=/tmp"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests:
               cpu: 100m
@@ -61,6 +66,9 @@ spec:
             initialDelaySeconds: 20
             periodSeconds: 5
             failureThreshold: 3
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
