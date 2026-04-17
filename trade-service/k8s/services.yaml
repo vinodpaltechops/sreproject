@@ -1,0 +1,80 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Services for Argo Rollouts progressive delivery
+#
+# Canary strategy  → stable + canary services
+# Blue-Green strategy → active + preview services
+#
+# Argo Rollouts controller manages pod-template-hash selectors on these
+# services automatically — do NOT add pod selectors manually here.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ── Canary: stable ────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: trade-service-stable
+  namespace: trade-app
+  labels:
+    app: trade-service
+    role: stable
+spec:
+  selector:
+    app: trade-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+
+---
+# ── Canary: canary ────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: trade-service-canary
+  namespace: trade-app
+  labels:
+    app: trade-service
+    role: canary
+spec:
+  selector:
+    app: trade-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+
+---
+# ── Blue-Green: active (live traffic) ────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: trade-service-active
+  namespace: trade-app
+  labels:
+    app: trade-service
+    role: active
+spec:
+  selector:
+    app: trade-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+
+---
+# ── Blue-Green: preview (new version, no live traffic) ───────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: trade-service-preview
+  namespace: trade-app
+  labels:
+    app: trade-service
+    role: preview
+spec:
+  selector:
+    app: trade-service
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

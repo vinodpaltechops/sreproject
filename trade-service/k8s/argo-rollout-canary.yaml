@@ -1,0 +1,137 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Canary Rollout — gradual traffic shift with automated Prometheus analysis
+#
+# Traffic progression:  10% → pause → 30% → analysis → 60% → analysis → 100%
+# Gateway API plugin:   Argo Rollouts updates HTTPRoute weights automatically
+# Abort condition:      any analysis failure rolls back to stable instantly
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: trade-service-canary
+  namespace: trade-app
+  labels:
+    app: trade-service
+    strategy: canary
+spec:
+  replicas: 4
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: trade-service
+  template:
+    metadata:
+      labels:
+        app: trade-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/actuator/prometheus"
+        prometheus.io/port: "8080"
+    spec:
+      serviceAccountName: trade-service-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
+      containers:
+        - name: trade-service
+          image: 748624205055.dkr.ecr.ap-south-1.amazonaws.com/trade-service:IMAGE_TAG
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: ENVIRONMENT
+              value: production
+            - name: SPRING_PROFILES_ACTIVE
+              value: production
+            - name: JAVA_TOOL_OPTIONS
+              value: "-Djava.io.tmpdir=/tmp"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+  strategy:
+    canary:
+      # Services Argo Rollouts manages traffic split between
+      stableService: trade-service-stable
+      canaryService: trade-service-canary
+
+      # Gateway API plugin updates HTTPRoute weights at each step
+      trafficRouting:
+        plugins:
+          argoproj-labs/gatewayAPI:
+            httpRoute: trade-routes
+            namespace: trade-app
+
+      steps:
+        # ── Step 1: Send 10% traffic to canary ───────────────────────────────
+        - setWeight: 10
+        - pause: {duration: 2m}
+
+        # ── Step 2: Run analysis at 10% ──────────────────────────────────────
+        - analysis:
+            templates:
+              - templateName: trade-success-rate
+              - templateName: trade-error-rate
+              - templateName: trade-latency
+            args:
+              - name: service-name
+                value: trade-service
+
+        # ── Step 3: Increase to 30% ──────────────────────────────────────────
+        - setWeight: 30
+        - pause: {duration: 2m}
+
+        # ── Step 4: Analysis at 30% ──────────────────────────────────────────
+        - analysis:
+            templates:
+              - templateName: trade-success-rate
+              - templateName: trade-error-rate
+            args:
+              - name: service-name
+                value: trade-service
+
+        # ── Step 5: Increase to 60% ──────────────────────────────────────────
+        - setWeight: 60
+        - pause: {duration: 2m}
+
+        # ── Step 6: Final analysis before full promotion ─────────────────────
+        - analysis:
+            templates:
+              - templateName: trade-success-rate
+              - templateName: trade-error-rate
+              - templateName: trade-latency
+            args:
+              - name: service-name
+                value: trade-service
+
+        # ── Step 7: Full promotion ───────────────────────────────────────────
+        - setWeight: 100

@@ -1,7 +1,18 @@
 # ──────────────────────────────────────────────────────────────────────────────
-# Gateway — AWS ALB via Gateway API
-# Requires: AWS Load Balancer Controller v2.7+ with Gateway API feature gate on
-# CRDs:     kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.1.0/standard-install.yaml
+# Gateway + HTTPRoutes — AWS ALB via Gateway API
+#
+# Argo Rollouts canary integration:
+#   The Rollouts controller dynamically updates weights on the `trade-routes`
+#   HTTPRoute (stable/canary backends) at each canary step.
+#
+# Blue-Green integration:
+#   `trade-routes-bg` routes all traffic to active service.
+#   Argo Rollouts switches the active service selector on promotion.
+#
+# Requires:
+#   - AWS Load Balancer Controller v2.7+ with --enable-gateway-api=true
+#   - Argo Rollouts Gateway API plugin installed
+#   - CRDs: kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.1.0/standard-install.yaml
 # ──────────────────────────────────────────────────────────────────────────────
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
@@ -17,15 +28,12 @@ metadata:
 spec:
   gatewayClassName: aws-alb
   listeners:
-    # HTTP — redirect all traffic to HTTPS
     - name: http
       protocol: HTTP
       port: 80
       allowedRoutes:
         namespaces:
           from: Same
-
-    # HTTPS — TLS terminated at ALB using ACM certificate
     - name: https
       protocol: HTTPS
       port: 443
@@ -34,15 +42,13 @@ spec:
         certificateRefs:
           - kind: Secret
             group: ""
-            name: tls-secret   # placeholder; ALB uses the ACM ARN annotation above
+            name: tls-secret
       allowedRoutes:
         namespaces:
           from: Same
 
 ---
-# ──────────────────────────────────────────────────────────────────────────────
-# HTTPRoute — HTTP → HTTPS redirect
-# ──────────────────────────────────────────────────────────────────────────────
+# HTTP → HTTPS redirect
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -61,12 +67,7 @@ spec:
 
 ---
 # ──────────────────────────────────────────────────────────────────────────────
-# HTTPRoute — main HTTPS routes
-# Routing strategy:
-#   /api/trades/**          → trade-service  (public)
-#   /actuator/health        → trade-service  (ALB health check only)
-#   /api/trades/simulate/** → BLOCKED        (chaos endpoints, internal only)
-#   /actuator/**            → BLOCKED        (never expose metrics/env externally)
+# Canary HTTPRoute — Argo Rollouts updates stable/canary weights at each step
 # ──────────────────────────────────────────────────────────────────────────────
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -79,7 +80,7 @@ spec:
       sectionName: https
   rules:
 
-    # ── Rule 1: Block chaos simulation endpoints from external traffic ─────────
+    # ── Block chaos endpoints from external traffic ────────────────────────────
     - matches:
         - path:
             type: PathPrefix
@@ -89,12 +90,9 @@ spec:
           requestRedirect:
             statusCode: 403
 
-    # ── Rule 2: Block all actuator except health (security — no metrics leak) ──
+    # ── Block sensitive actuator endpoints ─────────────────────────────────────
     - matches:
         - path:
-            type: PathPrefix
-            value: /actuator
-          path:
             type: PathPrefix
             value: /actuator/prometheus
         - path:
@@ -103,26 +101,28 @@ spec:
         - path:
             type: PathPrefix
             value: /actuator/loggers
+        - path:
+            type: PathPrefix
+            value: /actuator/metrics
       filters:
         - type: RequestRedirect
           requestRedirect:
             statusCode: 403
 
-    # ── Rule 3: Health check — allowed for ALB target group health probes ─────
+    # ── Health check (ALB target group probes) ─────────────────────────────────
     - matches:
         - path:
             type: PathPrefix
             value: /actuator/health
       backendRefs:
-        - name: trade-service
+        - name: trade-service-stable
           port: 8080
 
-    # ── Rule 4: Trade API — standard routing with timeout ─────────────────────
+    # ── Trade API — weighted canary split (Rollouts manages these weights) ──────
     - matches:
         - path:
             type: PathPrefix
             value: /api/trades
-          method: GET
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -130,33 +130,35 @@ spec:
               - name: X-Forwarded-By
                 value: sre-gateway
       backendRefs:
-        - name: trade-service
+        - name: trade-service-stable
           port: 8080
-
-    # ── Rule 5: Trade submission (POST) — canary header-based routing ──────────
-    # Header X-Canary: true  → canary deployment (weight 10)
-    # All other POST traffic → stable deployment (weight 90)
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /api/trades
-          method: POST
-          headers:
-            - name: X-Canary
-              value: "true"
-      backendRefs:
+          weight: 100   # Argo Rollouts sets this to (100 - canary%) at each step
         - name: trade-service-canary
           port: 8080
-          weight: 10
-        - name: trade-service
-          port: 8080
-          weight: 90
+          weight: 0     # Argo Rollouts sets this to canary% at each step
 
-    # ── Rule 6: All other POST/DELETE/PATCH trade requests ────────────────────
+---
+# ──────────────────────────────────────────────────────────────────────────────
+# Blue-Green HTTPRoute — all traffic to active service
+# Argo Rollouts switches active service selector on promotion, no route change needed
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: trade-routes-bg
+  namespace: trade-app
+spec:
+  parentRefs:
+    - name: sre-gateway
+      sectionName: https
+  rules:
     - matches:
         - path:
             type: PathPrefix
             value: /api/trades
+          headers:
+            - name: X-Strategy
+              value: bluegreen
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
@@ -164,5 +166,17 @@ spec:
               - name: X-Forwarded-By
                 value: sre-gateway
       backendRefs:
-        - name: trade-service
+        - name: trade-service-active
+          port: 8080
+
+    # Preview route — accessible only with header for QA/smoke testing
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/trades
+          headers:
+            - name: X-Preview
+              value: "true"
+      backendRefs:
+        - name: trade-service-preview
           port: 8080

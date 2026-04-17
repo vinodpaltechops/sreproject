@@ -1,0 +1,79 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# AnalysisTemplates — automated gate checks during rollouts
+# Prometheus address: kube-prometheus-stack (adjust if using different stack)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ── 1. Trade success rate ≥ 95% ───────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: trade-success-rate
+  namespace: trade-app
+spec:
+  args:
+    - name: service-name
+    - name: namespace
+      value: trade-app
+  metrics:
+    - name: success-rate
+      interval: 1m
+      count: 3
+      successCondition: result[0] >= 0.95
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: http://kube-prometheus-prometheus.monitoring:9090
+          query: |
+            sum(rate(trades_success_total{job="{{args.service-name}}"}[5m]))
+            /
+            clamp_min(sum(rate(trades_total{job="{{args.service-name}}"}[5m])), 1)
+
+---
+# ── 2. Error rate < 5% ────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: trade-error-rate
+  namespace: trade-app
+spec:
+  args:
+    - name: service-name
+  metrics:
+    - name: error-rate
+      interval: 1m
+      count: 3
+      successCondition: result[0] <= 0.05
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: http://kube-prometheus-prometheus.monitoring:9090
+          query: |
+            sum(rate(trades_failed_total{job="{{args.service-name}}"}[5m]))
+            /
+            clamp_min(sum(rate(trades_total{job="{{args.service-name}}"}[5m])), 1)
+
+---
+# ── 3. p99 latency < 2s ───────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: trade-latency
+  namespace: trade-app
+spec:
+  args:
+    - name: service-name
+  metrics:
+    - name: p99-latency
+      interval: 1m
+      count: 3
+      successCondition: result[0] <= 2.0
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: http://kube-prometheus-prometheus.monitoring:9090
+          query: |
+            histogram_quantile(0.99,
+              sum(rate(trade_processing_duration_seconds_bucket{
+                job="{{args.service-name}}"
+              }[5m])) by (le)
+            )

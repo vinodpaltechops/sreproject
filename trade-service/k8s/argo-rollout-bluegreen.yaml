@@ -1,0 +1,117 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Blue-Green Rollout — zero-downtime switch with pre/post promotion analysis
+#
+# Flow:
+#   1. New (green) pods start → preview service receives 0% live traffic
+#   2. Pre-promotion analysis runs against preview service
+#   3. Manual approval gate (autoPromotionEnabled: false)
+#   4. Active service switches to green pods instantly
+#   5. Post-promotion analysis confirms green is healthy
+#   6. Old (blue) pods scale down after 60s
+#
+# To promote:  kubectl argo rollouts promote trade-service-bluegreen -n trade-app
+# To abort:    kubectl argo rollouts abort  trade-service-bluegreen -n trade-app
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: trade-service-bluegreen
+  namespace: trade-app
+  labels:
+    app: trade-service
+    strategy: bluegreen
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: trade-service
+  template:
+    metadata:
+      labels:
+        app: trade-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/actuator/prometheus"
+        prometheus.io/port: "8080"
+    spec:
+      serviceAccountName: trade-service-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
+      containers:
+        - name: trade-service
+          image: 748624205055.dkr.ecr.ap-south-1.amazonaws.com/trade-service:IMAGE_TAG
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: ENVIRONMENT
+              value: production
+            - name: SPRING_PROFILES_ACTIVE
+              value: production
+            - name: JAVA_TOOL_OPTIONS
+              value: "-Djava.io.tmpdir=/tmp"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+  strategy:
+    blueGreen:
+      # Active = live traffic, Preview = new version being validated
+      activeService: trade-service-active
+      previewService: trade-service-preview
+
+      # Keep old (blue) pods running for 60s after switch — instant rollback window
+      scaleDownDelaySeconds: 60
+
+      # Require manual approval before switching active → green
+      autoPromotionEnabled: false
+
+      # Analysis against preview (green) pods before promotion
+      prePromotionAnalysis:
+        templates:
+          - templateName: trade-success-rate
+          - templateName: trade-error-rate
+          - templateName: trade-latency
+        args:
+          - name: service-name
+            value: trade-service
+
+      # Analysis after promotion — confirms green handles live traffic correctly
+      postPromotionAnalysis:
+        templates:
+          - templateName: trade-success-rate
+          - templateName: trade-error-rate
+        args:
+          - name: service-name
+            value: trade-service
