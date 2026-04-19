@@ -151,9 +151,9 @@ jobs:
 
           # Update the active rollout manifest
           if [ "$STRATEGY" = "canary" ]; then
-            MANIFEST="trade-service/k8s/argo-rollout-canary.yaml"
+            MANIFEST="trade-service/k8s/rollouts/canary.yaml"
           else
-            MANIFEST="trade-service/k8s/argo-rollout-bluegreen.yaml"
+            MANIFEST="trade-service/k8s/rollouts/bluegreen.yaml"
           fi
 
           # Replace IMAGE_TAG with git SHA (idempotent sed)
@@ -167,8 +167,8 @@ jobs:
           TAG=${{ needs.build.outputs.image_tag }}
           STRATEGY=${{ steps.strategy.outputs.strategy }}
 
-          git add trade-service/k8s/argo-rollout-canary.yaml \
-                  trade-service/k8s/argo-rollout-bluegreen.yaml
+          git add trade-service/k8s/rollouts/canary.yaml \
+                  trade-service/k8s/rollouts/bluegreen.yaml
 
           git diff --staged --quiet && echo "No changes to commit" && exit 0
 

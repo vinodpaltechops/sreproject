@@ -1,0 +1,18 @@
+name: Test Self-Hosted Runner
+on:
+  workflow_dispatch:    # manual trigger
+
+jobs:
+  test:
+    runs-on: arc-runner-set    # must match helm release name
+    steps:
+      - name: Check runner hostname
+        run: echo "Running on $(hostname)"
+
+      - name: Check node info
+        run: uname -a
+
+      - name: Check available resources
+        run: |
+          echo "CPU: $(nproc)"
+          echo "RAM: $(free -h | grep Mem)"
