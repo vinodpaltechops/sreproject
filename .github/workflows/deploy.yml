@@ -156,9 +156,9 @@ jobs:
             MANIFEST="trade-service/k8s/rollouts/bluegreen.yaml"
           fi
 
-          # Replace IMAGE_TAG with git SHA (idempotent sed)
-          CURRENT_TAG=$(grep -oP '(?<=trade-service:)[a-f0-9]+' $MANIFEST | head -1 || echo "IMAGE_TAG")
-          sed -i "s|trade-service:${CURRENT_TAG}|trade-service:${TAG}|g" $MANIFEST
+          # Replace the current tag (whatever it is: IMAGE_TAG placeholder or a prior SHA)
+          # with the new git SHA. Matches trade-service: followed by one token.
+          sed -i -E "s|(trade-service:)[A-Za-z0-9_.-]+|\1${TAG}|g" $MANIFEST
 
           echo "Updated $MANIFEST → image tag: $TAG"
 
