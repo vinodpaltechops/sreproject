@@ -48,34 +48,12 @@ spec:
       sectionName: http
   rules:
 
-    # ── Block chaos endpoints from external traffic ────────────────────────────
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /api/trades/simulate
-      filters:
-        - type: RequestRedirect
-          requestRedirect:
-            statusCode: 403
-
-    # ── Block sensitive actuator endpoints ─────────────────────────────────────
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /actuator/prometheus
-        - path:
-            type: PathPrefix
-            value: /actuator/env
-        - path:
-            type: PathPrefix
-            value: /actuator/loggers
-        - path:
-            type: PathPrefix
-            value: /actuator/metrics
-      filters:
-        - type: RequestRedirect
-          requestRedirect:
-            statusCode: 403
+    # Note: Gateway API RequestRedirect only supports 301/302.
+    # Chaos endpoints (/api/trades/simulate) and sensitive actuator endpoints
+    # (/actuator/prometheus, /env, /loggers, /metrics) are blocked via
+    # Spring Security + management.endpoints.web.exposure in application.yml,
+    # not at the Gateway layer. ServiceMonitor scrapes /actuator/prometheus
+    # cluster-internally, not through the ALB.
 
     # ── Health check (ALB target group probes) ─────────────────────────────────
     - matches:
