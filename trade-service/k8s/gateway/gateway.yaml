@@ -19,19 +19,15 @@ kind: Gateway
 metadata:
   name: sre-gateway
   namespace: trade-app
-  annotations:
-    alb.ingress.kubernetes.io/scheme: internet-facing
-    alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=60
 spec:
-  gatewayClassName: aws-alb
+  gatewayClassName: nginx        # was: aws-alb
   listeners:
     - name: http
       protocol: HTTP
       port: 80
       allowedRoutes:
         namespaces:
-          from: Same
+          from: Same             # or All / Selector, as needed
 
 ---
 # ──────────────────────────────────────────────────────────────────────────────
