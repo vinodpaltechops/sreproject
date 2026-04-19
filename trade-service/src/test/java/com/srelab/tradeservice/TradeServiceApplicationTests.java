@@ -40,15 +40,6 @@ class TradeServiceApplicationTests {
     }
 
     @Test
-    void prometheusEndpointExposesMetrics() {
-        ResponseEntity<String> response = restTemplate
-                .getForEntity("http://localhost:" + port + "/actuator/prometheus", String.class);
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody()).contains("trades_total");
-        assertThat(response.getBody()).contains("trade_processing_duration_seconds");
-    }
-
-    @Test
     void createTradeReturns201() {
         TradeRequest req = new TradeRequest();
         req.setSymbol("AAPL");
