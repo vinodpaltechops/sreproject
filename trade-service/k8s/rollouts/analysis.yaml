@@ -23,10 +23,15 @@ spec:
       provider:
         prometheus:
           address: http://kube-prometheus-stack-prometheus.monitoring:9090
+          # ServiceMonitor exposes 4 jobs (one per Service): -stable, -canary,
+          # -active, -preview. Regex matches all. `or vector(1)` returns a
+          # "healthy" default when no traffic yet — prevents empty-result crash.
           query: |
-            sum(rate(trades_success_total{job="{{args.service-name}}"}[5m]))
-            /
-            clamp_min(sum(rate(trades_total{job="{{args.service-name}}"}[5m])), 1)
+            (
+              sum(rate(trades_success_total{job=~"{{args.service-name}}.*"}[5m]))
+              /
+              clamp_min(sum(rate(trades_total{job=~"{{args.service-name}}.*"}[5m])), 1)
+            ) or vector(1)
 
 ---
 # ── 2. Error rate < 5% ────────────────────────────────────────────────────────
@@ -48,9 +53,11 @@ spec:
         prometheus:
           address: http://kube-prometheus-stack-prometheus.monitoring:9090
           query: |
-            sum(rate(trades_failed_total{job="{{args.service-name}}"}[5m]))
-            /
-            clamp_min(sum(rate(trades_total{job="{{args.service-name}}"}[5m])), 1)
+            (
+              sum(rate(trades_failed_total{job=~"{{args.service-name}}.*"}[5m]))
+              /
+              clamp_min(sum(rate(trades_total{job=~"{{args.service-name}}.*"}[5m])), 1)
+            ) or vector(0)
 
 ---
 # ── 3. p99 latency < 2s ───────────────────────────────────────────────────────
@@ -74,6 +81,6 @@ spec:
           query: |
             histogram_quantile(0.99,
               sum(rate(trade_processing_duration_seconds_bucket{
-                job="{{args.service-name}}"
+                job=~"{{args.service-name}}.*"
               }[5m])) by (le)
-            )
+            ) or vector(0)
