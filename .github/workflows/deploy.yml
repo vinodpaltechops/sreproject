@@ -218,7 +218,7 @@ jobs:
         run: |
           aws eks update-kubeconfig \
             --region ${{ env.AWS_REGION }} \
-            --name sre-lab
+            --name github-runners
 
       - name: Install Argo Rollouts kubectl plugin
         run: |
