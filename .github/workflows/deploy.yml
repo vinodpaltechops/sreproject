@@ -179,7 +179,17 @@ jobs:
           Strategy: ${STRATEGY}
           [skip ci]"
 
-          git push origin main
+          # Retry on non-fast-forward: remote may have advanced between checkout and push
+          for attempt in 1 2 3 4 5; do
+            if git push origin main; then
+              echo "Push succeeded on attempt $attempt"
+              exit 0
+            fi
+            echo "Push failed (attempt $attempt) — rebasing on origin/main and retrying"
+            git pull --rebase origin main
+          done
+          echo "Push failed after 5 attempts" >&2
+          exit 1
 
       - name: Summary
         run: |
