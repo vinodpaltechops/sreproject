@@ -42,7 +42,7 @@ spec:
         fsGroup: 2000
       containers:
         - name: trade-service
-          image: 748624205055.dkr.ecr.ap-south-1.amazonaws.com/trade-service:a657ae7bee7fd378674c7ee5d6324ca96229702c
+          image: 748624205055.dkr.ecr.ap-south-1.amazonaws.com/trade-service:4eceb1ea18e02d34d671ab1a22ace56bfd5d8398
           ports:
             - containerPort: 8080
           securityContext:
