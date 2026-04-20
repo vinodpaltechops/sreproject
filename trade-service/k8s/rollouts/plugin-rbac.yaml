@@ -1,0 +1,40 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# RBAC for the Argo Rollouts Gateway API plugin
+#
+# The plugin (argoproj-labs/gatewayAPI) used by canary.yaml needs permission in
+# this namespace to:
+#   - create/update a ConfigMap that tracks managed HTTPRoutes (coordination)
+#   - patch HTTPRoute weights at each canary step
+#
+# Without this, the controller logs:
+#   "failed to remove managed routes via plugin: configmaps is forbidden"
+# and the canary rollout stays Degraded with ProgressDeadlineExceeded.
+#
+# Blue-green doesn't need this — it switches service selectors, not routes.
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: argo-rollouts-gateway-plugin
+  namespace: trade-app
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes", "tcproutes", "grpcroutes"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: argo-rollouts-gateway-plugin
+  namespace: trade-app
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: argo-rollouts-gateway-plugin
+subjects:
+  - kind: ServiceAccount
+    name: argo-rollouts
+    namespace: argo-rollouts
