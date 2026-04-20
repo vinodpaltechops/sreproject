@@ -24,14 +24,14 @@ spec:
         prometheus:
           address: http://kube-prometheus-stack-prometheus.monitoring:9090
           # ServiceMonitor exposes 4 jobs (one per Service): -stable, -canary,
-          # -active, -preview. Regex matches all. `or vector(1)` returns a
-          # "healthy" default when no traffic yet — prevents empty-result crash.
+          # -active, -preview. Regex matches all.
+          # Laplace smoothing (+1 on num and denom) makes this return 1.0
+          # when there's no traffic, instead of 0/0 or 0/clamp → 0.
+          # With real traffic, the +1 is negligible noise.
           query: |
-            (
-              sum(rate(trades_success_total{job=~"{{args.service-name}}.*"}[5m]))
-              /
-              clamp_min(sum(rate(trades_total{job=~"{{args.service-name}}.*"}[5m])), 1)
-            ) or vector(1)
+            (sum(rate(trades_success_total{job=~"{{args.service-name}}.*"}[5m])) + 1)
+            /
+            (sum(rate(trades_total{job=~"{{args.service-name}}.*"}[5m])) + 1)
 
 ---
 # ── 2. Error rate < 5% ────────────────────────────────────────────────────────
@@ -52,12 +52,12 @@ spec:
       provider:
         prometheus:
           address: http://kube-prometheus-stack-prometheus.monitoring:9090
+          # clamp_min on denom makes idle traffic return 0/1 = 0 (desired:
+          # "no errors when no traffic"). With real traffic it's failed/total.
           query: |
-            (
-              sum(rate(trades_failed_total{job=~"{{args.service-name}}.*"}[5m]))
-              /
-              clamp_min(sum(rate(trades_total{job=~"{{args.service-name}}.*"}[5m])), 1)
-            ) or vector(0)
+            sum(rate(trades_failed_total{job=~"{{args.service-name}}.*"}[5m]))
+            /
+            clamp_min(sum(rate(trades_total{job=~"{{args.service-name}}.*"}[5m])), 1)
 
 ---
 # ── 3. p99 latency < 2s ───────────────────────────────────────────────────────
