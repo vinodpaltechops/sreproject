@@ -78,9 +78,13 @@ spec:
       provider:
         prometheus:
           address: http://kube-prometheus-stack-prometheus.monitoring:9090
+          # histogram_quantile returns NaN when all buckets have rate=0 (idle
+          # traffic with stale series). NaN <= 2.0 is false → metric fails.
+          # `>= 0` filters NaN (NaN comparisons are false → series dropped),
+          # then `or vector(0)` fills the empty result with 0 (healthy idle).
           query: |
-            histogram_quantile(0.99,
+            (histogram_quantile(0.99,
               sum(rate(trade_processing_duration_seconds_bucket{
                 job=~"{{args.service-name}}.*"
               }[5m])) by (le)
-            ) or vector(0)
+            ) >= 0) or vector(0)
