@@ -23,6 +23,11 @@ env:
   ECR_REGISTRY: 748624205055.dkr.ecr.ap-south-1.amazonaws.com
   ECR_REPOSITORY: trade-service
 
+# Serialize runs so two pipelines never race on the bot commit/push to main.
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Job 1 — Test
 # ──────────────────────────────────────────────────────────────────────────────
@@ -179,14 +184,22 @@ jobs:
           Strategy: ${STRATEGY}
           [skip ci]"
 
-          # Retry on non-fast-forward: remote may have advanced between checkout and push
+          # Rebase-and-retry on non-fast-forward: remote may have advanced
+          # between checkout and push (e.g. another pipeline bot commit landed).
           for attempt in 1 2 3 4 5; do
             if git push origin main; then
               echo "Push succeeded on attempt $attempt"
               exit 0
             fi
-            echo "Push failed (attempt $attempt) — rebasing on origin/main and retrying"
-            git pull --rebase origin main
+            echo "Push failed (attempt $attempt) — fetching + rebasing onto origin/main"
+            git fetch origin main
+            # Rebase our commit on top of the new origin/main. If rebase
+            # conflicts on the manifest, keep OUR version (newer image tag wins).
+            git rebase origin/main -X theirs || {
+              echo "Rebase conflict couldn't be auto-resolved; aborting" >&2
+              git rebase --abort || true
+              exit 1
+            }
           done
           echo "Push failed after 5 attempts" >&2
           exit 1
