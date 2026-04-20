@@ -21,6 +21,16 @@ metadata:
   namespace: trade-app
 spec:
   gatewayClassName: nginx        # was: aws-alb
+  # NGF 2.x propagates these annotations onto the LoadBalancer Service it
+  # creates. AWS Load Balancer Controller watches for `type: external` and
+  # provisions an NLB with IP target-type (traffic goes directly to pod IPs,
+  # bypassing NodePort). Without these, the in-tree CCM provisions a CLB.
+  infrastructure:
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: external
+      service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+      service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+      service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
   listeners:
     - name: http
       protocol: HTTP
