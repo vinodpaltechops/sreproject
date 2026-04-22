@@ -1,0 +1,64 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# eksctl ClusterConfig — re-create github-runners cluster
+#
+# Run:  eksctl create cluster -f aws/respin/eksctl-cluster.yaml
+#
+# Produces:
+#   - EKS control plane (github-runners)
+#   - Managed node group (2x t3.medium, on-demand)
+#   - Dedicated VPC + public/private subnets across 2 AZs
+#   - OIDC provider (required for IRSA used by AWS LBC and app SA)
+#   - IRSA role for AWS Load Balancer Controller (bound to kube-system/aws-load-balancer-controller SA)
+#
+# Tears down cleanly via:
+#   eksctl delete cluster -f aws/respin/eksctl-cluster.yaml --disable-nodegroup-eviction
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: github-runners
+  region: ap-south-1
+  version: "1.30"
+
+# OIDC must be true so ServiceAccounts can assume IAM roles (IRSA)
+iam:
+  withOIDC: true
+  serviceAccounts:
+    # Pre-create the IRSA binding for AWS Load Balancer Controller.
+    # The helm install in bootstrap.sh references this same SA name.
+    - metadata:
+        name: aws-load-balancer-controller
+        namespace: kube-system
+      attachPolicyARNs:
+        - arn:aws:iam::748624205055:policy/AWSLoadBalancerControllerIAMPolicy
+      roleName: AmazonEKSLoadBalancerControllerRole
+      roleOnly: false
+
+managedNodeGroups:
+  - name: workers
+    instanceType: t3.medium
+    desiredCapacity: 2
+    minSize: 2
+    maxSize: 4
+    volumeSize: 30
+    privateNetworking: false
+    labels:
+      role: worker
+    iam:
+      withAddonPolicies:
+        imageBuilder: true
+        autoScaler: true
+        ebs: true
+        cloudWatch: true
+
+# Managed add-ons — kube-proxy/CoreDNS/VPC-CNI auto-upgraded by EKS
+addons:
+  - name: vpc-cni
+  - name: coredns
+  - name: kube-proxy
+  - name: eks-pod-identity-agent
+
+cloudWatch:
+  clusterLogging:
+    enableTypes: ["api", "audit", "authenticator"]
