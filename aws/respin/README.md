@@ -66,6 +66,41 @@ Per the current decision, everything AWS-side is destroyed. The only persistence
 - **Git repo** — all manifests, pipeline, and these re-spin artifacts
 - **GitHub Secrets** — `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (reusable for re-spin)
 
+## Shared-tenant workloads (not part of trade-service, but present on the cluster)
+
+The `github-runners` cluster also hosted these on teardown day. `bootstrap.sh` does **not** install them — if you need them back, add the matching recipe below. Each is an independent upstream chart / manifest:
+
+### GitHub Actions Runner Controller (ARC) — `arc-systems` + `arc-runners`
+```bash
+helm install arc oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
+  --namespace arc-systems --create-namespace
+helm install arc-runner-set oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set \
+  --namespace arc-runners --create-namespace \
+  --set githubConfigUrl="https://github.com/vinodpaltechops/sreproject" \
+  --set githubConfigSecret.github_token="<PAT with repo scope>"
+```
+
+### Cluster Autoscaler — `kube-system`
+```bash
+helm repo add autoscaler https://kubernetes.github.io/autoscaler
+helm install cluster-autoscaler autoscaler/cluster-autoscaler \
+  -n kube-system \
+  --set autoDiscovery.clusterName=github-runners \
+  --set awsRegion=ap-south-1
+```
+Node group must be tagged `k8s.io/cluster-autoscaler/enabled=true` and `k8s.io/cluster-autoscaler/github-runners=owned` (already set by the eksctl config above).
+
+### cert-manager — `cert-manager`
+```bash
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.0/cert-manager.yaml
+```
+
+### Vault — `vault` (was empty on teardown day, skip unless needed)
+```bash
+helm repo add hashicorp https://helm.releases.hashicorp.com
+helm install vault hashicorp/vault -n vault --create-namespace
+```
+
 ## Notes
 
 - The `eksctl-cluster.yaml` assumes the IAM policy already exists. If you run `eksctl` before `aws iam create-policy`, cluster creation fails on the IRSA SA step. The re-spin order above handles this.
